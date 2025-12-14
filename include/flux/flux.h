@@ -461,11 +461,11 @@ tuple_has_elem(cute::tuple<Ts...> const &tup, Elem const &e) {
 // Enum classes
 /////////////////////////////////////////////////////
 enum class DataTypeEnum : int8_t { Void, FP16, BF16, FP32, E4M3, E5M2, S8, S32 };
-enum class ArchEnum : int { Sm80 = 80, Sm89 = 89, Sm90 = 90 };
+enum class ArchEnum : int { Sm80 = 80, Sm86 = 86, Sm89 = 89, Sm90 = 90 };
 // Use CUDA cores per SM to denote different GPU device, in order to separate GPU with same
 // ArchEnum, e.g. both H20 and H800 use SM90, could replace ArchEnum later. Currently limited to
 // below 4 GPU devices.
-enum class SMCoreEnum : int { L20 = 92, A100 = 108, H20 = 78, H800 = 132 };
+enum class SMCoreEnum : int { L20 = 92, A6000 = 84, A100 = 108, H20 = 78, H800 = 132 };
 enum class CommOpEnum : int8_t {
   CommNone,                   // gemm only, wo/ communication
   AllGather,                  // tp allgather + gemm, comm not fused into gemm kernel
@@ -528,10 +528,12 @@ using _RCR = cute::C<GemmLayoutEnum::RCR>;
 using _RCC = cute::C<GemmLayoutEnum::RCC>;
 
 using _Sm80 = cute::C<ArchEnum::Sm80>;
+using _Sm86 = cute::C<ArchEnum::Sm86>;
 using _Sm89 = cute::C<ArchEnum::Sm89>;
 using _Sm90 = cute::C<ArchEnum::Sm90>;
 
 using _L20 = cute::C<SMCoreEnum::L20>;
+using _A6000 = cute::C<SMCoreEnum::A6000>;
 using _A100 = cute::C<SMCoreEnum::A100>;
 using _H20 = cute::C<SMCoreEnum::H20>;
 using _H800 = cute::C<SMCoreEnum::H800>;
@@ -777,6 +779,7 @@ inline char const *
 enum_to_string(ArchEnum arch) {
   switch (arch) {
     case ArchEnum::Sm80: return "Sm80";
+    case ArchEnum::Sm86: return "Sm86";
     case ArchEnum::Sm89: return "Sm89";
     case ArchEnum::Sm90: return "Sm90";
     default: return "UNK";
@@ -787,6 +790,7 @@ inline char const *
 enum_to_string(SMCoreEnum sm_core) {
   switch (sm_core) {
     case SMCoreEnum::L20: return "L20";
+    case SMCoreEnum::A6000: return "A6000";
     case SMCoreEnum::A100: return "A100";
     case SMCoreEnum::H20: return "H20";
     case SMCoreEnum::H800: return "H800";

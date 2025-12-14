@@ -36,15 +36,15 @@ if(CUDAToolkit_VERSION VERSION_LESS "11.0")
   message(FATAL_ERROR "requires cuda to be >= 11.0")
 elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
   set(CUDAARCHS
-      "80"
+      "80;86"
       CACHE STRING "CUDA Architectures")
 elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.4")
   set(CUDAARCHS
-      "80;89;90"
+      "80;86;89;90"
       CACHE STRING "CUDA Architectures")
 else()
   set(CUDAARCHS
-      "80;90"
+      "80;86;90"
       CACHE STRING "CUDA Architectures")
 endif()
 
@@ -80,6 +80,8 @@ else()
                     set(CURRENT_SM_COUNT 108)
                 elseif(GPU_NAME MATCHES "H800")
                     set(CURRENT_SM_COUNT 132)
+                elseif(GPU_NAME MATCHES "A6000")
+                    set(CURRENT_SM_COUNT 84)
                 elseif(GPU_NAME MATCHES "L20")
                     set(CURRENT_SM_COUNT 92)
                 elseif(GPU_NAME MATCHES "H20")
@@ -158,6 +160,8 @@ if(BUILD_THS)
   foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
     if(ARCH STREQUAL "80")
       list(APPEND TORCH_CUDA_ARCH_LIST "8.0")
+    elseif(ARCH STREQUAL "86")
+      list(APPEND TORCH_CUDA_ARCH_LIST "8.6")
     elseif(ARCH STREQUAL "89")
       list(APPEND TORCH_CUDA_ARCH_LIST "8.9")
     elseif(ARCH STREQUAL "90")

@@ -289,13 +289,13 @@ auto_impl_spec(GemmMeta<Ts...> meta) {
     auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
     if constexpr (meta.arch() == _Sm89{} && dt_conf.is_input_fp8()) {
       return make_gemm_v2_hparams(Shape<_64, _32, _64>{}, Shape<_16, _8, _32>{});
-    } else if constexpr (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) {
+    } else if constexpr ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) {
       return make_gemm_v2_hparams(Shape<_64, _32, _128>{}, Shape<_16, _8, _32>{});
     } else {
       return make_gemm_v2_hparams(Shape<_64, _64, _32>{}, Shape<_16, _8, _16>{});
     }
   } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-    if constexpr (meta.arch() == _Sm80{}) {
+    if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
       return make_gemm_v3_hparams(Shape<_1, _1, _1>{});
     } else if constexpr (meta.arch() == _Sm90{}) {
       if constexpr (to_gemm_v3_meta(meta.impl_spec()).block_scale()) {
@@ -343,7 +343,7 @@ materialize_tile_shape_m(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
       return 128;
     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-      if constexpr (meta.arch() == _Sm80{}) {
+      if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
         return 256;
       } else {
         if constexpr (is_tile_n_auto) {
@@ -388,11 +388,11 @@ materialize_tile_shape_n(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
 
     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
       return ((meta.arch() == _Sm89{} && dt_conf.is_input_fp8()) or
-              (meta.arch() == _Sm80{} && dt_conf.is_input_s8()))
+              ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()))
                  ? 64
                  : 128;
     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-      if constexpr (meta.arch() == _Sm80{}) {
+      if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
         return 128;
       } else {
         constexpr bool scale_down_for_pingpong =
@@ -443,10 +443,10 @@ materialize_tile_shape_k(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
     auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
       return (meta.arch() == _Sm89{} && dt_conf.is_input_fp8())  ? 64
-             : (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) ? 128
+             : ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) ? 128
                                                                  : 32;
     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-      return meta.arch() == _Sm80{}
+      return meta.arch() == _Sm80{} or meta.arch() == _Sm86{}
                  ? 32
                  : 128 / cute::max(sizeof_dtype(dt_conf.a()), sizeof_dtype(dt_conf.b()));
     } else {
@@ -487,7 +487,7 @@ auto_mainloop_stage(GemmMeta<Ts...> meta, TileShape const &) {
     } else {
       return cute::_4{};
     }
-  } else if constexpr (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) {
+  } else if constexpr ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) {
     return cute::_3{};
   } else {
     return cute::_4{};
@@ -562,6 +562,9 @@ filter_smem(GemmMeta<Ts...> meta, GemmHParams<Us...> hparams) {
                         hparams.mainloop_stage();
   // print("!!!!!!!!!!!! expect min smem : %d\n", expect_min_smem);
   if (meta.arch() == _Sm80{} and expect_min_smem > 163 * 1024) {
+    return false;
+  }
+  if (meta.arch() == _Sm86{} and expect_min_smem > 99 * 1024) {
     return false;
   }
   if (meta.arch() == _Sm89{} and expect_min_smem > 99 * 1024) {

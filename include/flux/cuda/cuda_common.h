@@ -129,6 +129,9 @@ auto
 to_cutlass_archtag(cute::C<E> arch) {
   if constexpr (arch == _Sm80{}) {
     return make_declval<cutlass::arch::Sm80>();
+} else if constexpr (arch == _Sm86{}) { // [new]  add Sm86 support
+    // CUTLASS use Sm80 for sm86
+    return make_declval<cutlass::arch::Sm80>();
   } else if constexpr (arch == _Sm89{}) {
     return make_declval<cutlass::arch::Sm89>();
   } else if constexpr (arch == _Sm90{}) {

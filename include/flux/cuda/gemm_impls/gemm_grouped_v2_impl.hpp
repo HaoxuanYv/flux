@@ -65,7 +65,8 @@ make_align(SizeT size, AlignT align = 128) {
 template <class GemmMetaT, class GemmHParamsT>
 struct GemmGroupedV2BaseKernel {
   static constexpr auto meta = to_gemm_meta(GemmMetaT{});
-  static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm89{}, "requires either SM80 or SM89");
+  static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm86{} or meta.arch() == _Sm89{}, "requires SM80, SM86 or SM89");
+  // static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm89{}, "requires either SM80 or SM89");
   static constexpr auto hparams = to_gemm_hparams(GemmHParamsT{});
   static constexpr auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
 
