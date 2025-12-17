@@ -1,0 +1,377 @@
+From 94f610f5e8a5f0322a2217b0093c22de1cd8bc86 Mon Sep 17 00:00:00 2001
+From: hxyu <yhxuan77@163.com>
+Date: Sun, 14 Dec 2025 14:09:45 +0000
+Subject: [PATCH] A6000 arch compile support
+
+---
+ CMakeLists.txt                                | 10 +++++++---
+ build.sh                                      |  3 ++-
+ include/flux/cuda/cuda_common.h               |  3 +++
+ .../cuda/gemm_impls/gemm_grouped_v2_impl.hpp  |  3 ++-
+ include/flux/flux.h                           |  8 ++++++--
+ include/flux/gemm_hparams.h                   | 19 +++++++++++--------
+ src/cuda/op_registry.cu                       |  3 ++-
+ src/generator/gen_ag_gemm.cc                  |  8 ++++----
+ src/generator/gen_comm_none.cc                | 12 ++++++------
+ src/generator/gen_gemm_rs.cc                  | 10 +++++-----
+ src/generator/gen_moe_ag_scatter.cc           |  4 ++--
+ src/generator/gen_moe_gather_rs.cc            |  4 ++--
+ 12 files changed, 52 insertions(+), 35 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ed06363..ab913f5 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -36,15 +36,15 @@ if(CUDAToolkit_VERSION VERSION_LESS "11.0")
+   message(FATAL_ERROR "requires cuda to be >= 11.0")
+ elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
+   set(CUDAARCHS
+-      "80"
++      "80;86"
+       CACHE STRING "CUDA Architectures")
+ elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.4")
+   set(CUDAARCHS
+-      "80;89;90"
++      "80;86;89;90"
+       CACHE STRING "CUDA Architectures")
+ else()
+   set(CUDAARCHS
+-      "80;90"
++      "80;86;90"
+       CACHE STRING "CUDA Architectures")
+ endif()
+ 
+@@ -80,6 +80,8 @@ else()
+                     set(CURRENT_SM_COUNT 108)
+                 elseif(GPU_NAME MATCHES "H800")
+                     set(CURRENT_SM_COUNT 132)
++                elseif(GPU_NAME MATCHES "A6000")
++                    set(CURRENT_SM_COUNT 84)
+                 elseif(GPU_NAME MATCHES "L20")
+                     set(CURRENT_SM_COUNT 92)
+                 elseif(GPU_NAME MATCHES "H20")
+@@ -158,6 +160,8 @@ if(BUILD_THS)
+   foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
+     if(ARCH STREQUAL "80")
+       list(APPEND TORCH_CUDA_ARCH_LIST "8.0")
++    elseif(ARCH STREQUAL "86")
++      list(APPEND TORCH_CUDA_ARCH_LIST "8.6")
+     elseif(ARCH STREQUAL "89")
+       list(APPEND TORCH_CUDA_ARCH_LIST "8.9")
+     elseif(ARCH STREQUAL "90")
+diff --git a/build.sh b/build.sh
+index 2feb4ef..6c961a4 100755
+--- a/build.sh
++++ b/build.sh
+@@ -224,7 +224,8 @@ function build_flux_py {
+     fi
+     popd
+     ##### build flux torch bindings #####
+-    MAX_JOBS=${JOBS} python3 setup.py develop --user
++    # MAX_JOBS=${JOBS} python3 setup.py develop --user
++    MAX_JOBS=${JOBS} pip3 install -e . --no-build-isolation
+     if [ $BDIST_WHEEL == "ON" ]; then
+         MAX_JOBS=${JOBS} python3 setup.py bdist_wheel
+     fi
+diff --git a/include/flux/cuda/cuda_common.h b/include/flux/cuda/cuda_common.h
+index 6884d24..f4bea0e 100644
+--- a/include/flux/cuda/cuda_common.h
++++ b/include/flux/cuda/cuda_common.h
+@@ -129,6 +129,9 @@ auto
+ to_cutlass_archtag(cute::C<E> arch) {
+   if constexpr (arch == _Sm80{}) {
+     return make_declval<cutlass::arch::Sm80>();
++} else if constexpr (arch == _Sm86{}) { // [new]  add Sm86 support
++    // CUTLASS use Sm80 for sm86
++    return make_declval<cutlass::arch::Sm80>();
+   } else if constexpr (arch == _Sm89{}) {
+     return make_declval<cutlass::arch::Sm89>();
+   } else if constexpr (arch == _Sm90{}) {
+diff --git a/include/flux/cuda/gemm_impls/gemm_grouped_v2_impl.hpp b/include/flux/cuda/gemm_impls/gemm_grouped_v2_impl.hpp
+index 3cad0f9..5adb33d 100644
+--- a/include/flux/cuda/gemm_impls/gemm_grouped_v2_impl.hpp
++++ b/include/flux/cuda/gemm_impls/gemm_grouped_v2_impl.hpp
+@@ -65,7 +65,8 @@ make_align(SizeT size, AlignT align = 128) {
+ template <class GemmMetaT, class GemmHParamsT>
+ struct GemmGroupedV2BaseKernel {
+   static constexpr auto meta = to_gemm_meta(GemmMetaT{});
+-  static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm89{}, "requires either SM80 or SM89");
++  static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm86{} or meta.arch() == _Sm89{}, "requires SM80, SM86 or SM89");
++  // static_assert(meta.arch() == _Sm80{} or meta.arch() == _Sm89{}, "requires either SM80 or SM89");
+   static constexpr auto hparams = to_gemm_hparams(GemmHParamsT{});
+   static constexpr auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
+ 
+diff --git a/include/flux/flux.h b/include/flux/flux.h
+index f6540cb..c173e7b 100644
+--- a/include/flux/flux.h
++++ b/include/flux/flux.h
+@@ -461,11 +461,11 @@ tuple_has_elem(cute::tuple<Ts...> const &tup, Elem const &e) {
+ // Enum classes
+ /////////////////////////////////////////////////////
+ enum class DataTypeEnum : int8_t { Void, FP16, BF16, FP32, E4M3, E5M2, S8, S32 };
+-enum class ArchEnum : int { Sm80 = 80, Sm89 = 89, Sm90 = 90 };
++enum class ArchEnum : int { Sm80 = 80, Sm86 = 86, Sm89 = 89, Sm90 = 90 };
+ // Use CUDA cores per SM to denote different GPU device, in order to separate GPU with same
+ // ArchEnum, e.g. both H20 and H800 use SM90, could replace ArchEnum later. Currently limited to
+ // below 4 GPU devices.
+-enum class SMCoreEnum : int { L20 = 92, A100 = 108, H20 = 78, H800 = 132 };
++enum class SMCoreEnum : int { L20 = 92, A6000 = 84, A100 = 108, H20 = 78, H800 = 132 };
+ enum class CommOpEnum : int8_t {
+   CommNone,                   // gemm only, wo/ communication
+   AllGather,                  // tp allgather + gemm, comm not fused into gemm kernel
+@@ -528,10 +528,12 @@ using _RCR = cute::C<GemmLayoutEnum::RCR>;
+ using _RCC = cute::C<GemmLayoutEnum::RCC>;
+ 
+ using _Sm80 = cute::C<ArchEnum::Sm80>;
++using _Sm86 = cute::C<ArchEnum::Sm86>;
+ using _Sm89 = cute::C<ArchEnum::Sm89>;
+ using _Sm90 = cute::C<ArchEnum::Sm90>;
+ 
+ using _L20 = cute::C<SMCoreEnum::L20>;
++using _A6000 = cute::C<SMCoreEnum::A6000>;
+ using _A100 = cute::C<SMCoreEnum::A100>;
+ using _H20 = cute::C<SMCoreEnum::H20>;
+ using _H800 = cute::C<SMCoreEnum::H800>;
+@@ -777,6 +779,7 @@ inline char const *
+ enum_to_string(ArchEnum arch) {
+   switch (arch) {
+     case ArchEnum::Sm80: return "Sm80";
++    case ArchEnum::Sm86: return "Sm86";
+     case ArchEnum::Sm89: return "Sm89";
+     case ArchEnum::Sm90: return "Sm90";
+     default: return "UNK";
+@@ -787,6 +790,7 @@ inline char const *
+ enum_to_string(SMCoreEnum sm_core) {
+   switch (sm_core) {
+     case SMCoreEnum::L20: return "L20";
++    case SMCoreEnum::A6000: return "A6000";
+     case SMCoreEnum::A100: return "A100";
+     case SMCoreEnum::H20: return "H20";
+     case SMCoreEnum::H800: return "H800";
+diff --git a/include/flux/gemm_hparams.h b/include/flux/gemm_hparams.h
+index 0db1058..a9bed5f 100644
+--- a/include/flux/gemm_hparams.h
++++ b/include/flux/gemm_hparams.h
+@@ -289,13 +289,13 @@ auto_impl_spec(GemmMeta<Ts...> meta) {
+     auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
+     if constexpr (meta.arch() == _Sm89{} && dt_conf.is_input_fp8()) {
+       return make_gemm_v2_hparams(Shape<_64, _32, _64>{}, Shape<_16, _8, _32>{});
+-    } else if constexpr (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) {
++    } else if constexpr ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) {
+       return make_gemm_v2_hparams(Shape<_64, _32, _128>{}, Shape<_16, _8, _32>{});
+     } else {
+       return make_gemm_v2_hparams(Shape<_64, _64, _32>{}, Shape<_16, _8, _16>{});
+     }
+   } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
+-    if constexpr (meta.arch() == _Sm80{}) {
++    if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
+       return make_gemm_v3_hparams(Shape<_1, _1, _1>{});
+     } else if constexpr (meta.arch() == _Sm90{}) {
+       if constexpr (to_gemm_v3_meta(meta.impl_spec()).block_scale()) {
+@@ -343,7 +343,7 @@ materialize_tile_shape_m(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
+     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
+       return 128;
+     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
+-      if constexpr (meta.arch() == _Sm80{}) {
++      if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
+         return 256;
+       } else {
+         if constexpr (is_tile_n_auto) {
+@@ -388,11 +388,11 @@ materialize_tile_shape_n(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
+ 
+     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
+       return ((meta.arch() == _Sm89{} && dt_conf.is_input_fp8()) or
+-              (meta.arch() == _Sm80{} && dt_conf.is_input_s8()))
++              ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()))
+                  ? 64
+                  : 128;
+     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
+-      if constexpr (meta.arch() == _Sm80{}) {
++      if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
+         return 128;
+       } else {
+         constexpr bool scale_down_for_pingpong =
+@@ -443,10 +443,10 @@ materialize_tile_shape_k(GemmMeta<Ts...> meta, ImplHParams impl_hparams, TileSha
+     auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
+     if constexpr (meta.impl() == _GemmV2{} or meta.impl() == _GemmGroupedV2{}) {
+       return (meta.arch() == _Sm89{} && dt_conf.is_input_fp8())  ? 64
+-             : (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) ? 128
++             : ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) ? 128
+                                                                  : 32;
+     } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
+-      return meta.arch() == _Sm80{}
++      return meta.arch() == _Sm80{} or meta.arch() == _Sm86{}
+                  ? 32
+                  : 128 / cute::max(sizeof_dtype(dt_conf.a()), sizeof_dtype(dt_conf.b()));
+     } else {
+@@ -487,7 +487,7 @@ auto_mainloop_stage(GemmMeta<Ts...> meta, TileShape const &) {
+     } else {
+       return cute::_4{};
+     }
+-  } else if constexpr (meta.arch() == _Sm80{} && dt_conf.is_input_s8()) {
++  } else if constexpr ((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) && dt_conf.is_input_s8()) {
+     return cute::_3{};
+   } else {
+     return cute::_4{};
+@@ -564,6 +564,9 @@ filter_smem(GemmMeta<Ts...> meta, GemmHParams<Us...> hparams) {
+   if (meta.arch() == _Sm80{} and expect_min_smem > 163 * 1024) {
+     return false;
+   }
++  if (meta.arch() == _Sm86{} and expect_min_smem > 99 * 1024) {
++    return false;
++  }
+   if (meta.arch() == _Sm89{} and expect_min_smem > 99 * 1024) {
+     return false;
+   }
+diff --git a/src/cuda/op_registry.cu b/src/cuda/op_registry.cu
+index 97115a8..980f206 100644
+--- a/src/cuda/op_registry.cu
++++ b/src/cuda/op_registry.cu
+@@ -36,7 +36,7 @@ init_device_properties() {
+   cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0);
+   cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0);
+   int arch_num = major * 10 + minor;
+-  FLUX_CHECK(arch_num == 80 || arch_num == 89 || arch_num == 90)
++  FLUX_CHECK(arch_num == 80 || arch_num == 89 || arch_num == 90 || arch_num == 86)
+       << "unsupported arch: " << arch_num;
+   arch = ArchEnum{arch_num};
+ 
+@@ -48,6 +48,7 @@ init_device_properties() {
+     case 108: sm_core = SMCoreEnum::A100; break;
+     case 78: sm_core = SMCoreEnum::H20; break;
+     case 132: sm_core = SMCoreEnum::H800; break;
++    case 84: sm_core = SMCoreEnum::A6000; break;
+     default: FLUX_CHECK(false) << "Unsupported SM count for SMCoreEnum: " << sm_count; break;
+   }
+ }
+diff --git a/src/generator/gen_ag_gemm.cc b/src/generator/gen_ag_gemm.cc
+index e4a33b5..7f2eadc 100644
+--- a/src/generator/gen_ag_gemm.cc
++++ b/src/generator/gen_ag_gemm.cc
+@@ -27,8 +27,8 @@ struct GemmV2AGKernel_Space {
+           make_gemm_dtype_config(_BF16{}),
+           make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+           make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_AGKernel{}),
+       cute::make_tuple(_RCR{}, _RRR{}),
+       cute::make_tuple(_GemmV2{}));
+@@ -76,8 +76,8 @@ struct GemmV2AGKernel_Space {
+       cute::make_tuple(
+           make_gemm_dtype_config(_S8{}, _S8{}, _BF16{}, _BF16{}, _S32{}),
+           make_gemm_dtype_config(_S8{}, _S8{}, _Void{}, _BF16{}, _S32{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_AGKernel{}),
+       cute::make_tuple(_RCR{}),
+       cute::make_tuple(_GemmV2{}));
+diff --git a/src/generator/gen_comm_none.cc b/src/generator/gen_comm_none.cc
+index 6d158a0..faf3e9c 100644
+--- a/src/generator/gen_comm_none.cc
++++ b/src/generator/gen_comm_none.cc
+@@ -29,8 +29,8 @@ struct GemmV2CommNone_Space {
+           make_gemm_dtype_config(_BF16{}),
+           make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+           make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_CommNone{}),
+       cute::make_tuple(_RCR{}, _RRR{}),
+       cute::make_tuple(_GemmV2{}));
+@@ -62,8 +62,8 @@ struct GemmV2CommNone_Space {
+       cute::make_tuple(
+           make_gemm_dtype_config(_S8{}, _S8{}, _BF16{}, _BF16{}, _S32{}),
+           make_gemm_dtype_config(_S8{}, _S8{}, _Void{}, _BF16{}, _S32{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_CommNone{}),
+       cute::make_tuple(_RCR{}),
+       cute::make_tuple(_GemmV2{}));
+@@ -268,8 +268,8 @@ struct GemmGroupedV2CommNone_Space {
+           make_gemm_dtype_config(_BF16{}),
+           make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+           make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_CommNone{}),
+       cute::make_tuple(_RCR{}, _RCC{}),
+       cute::make_tuple(_GemmGroupedV2{}),
+diff --git a/src/generator/gen_gemm_rs.cc b/src/generator/gen_gemm_rs.cc
+index 302288c..9d1c1b1 100644
+--- a/src/generator/gen_gemm_rs.cc
++++ b/src/generator/gen_gemm_rs.cc
+@@ -30,8 +30,8 @@ struct GemmV2ReduceScatter_Space {
+               make_gemm_dtype_config(_BF16{}),
+               make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+               make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-          cute::make_tuple(_Sm80{}, _Sm89{}),
+-          cute::make_tuple(_A100{}, _L20{}),
++          cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++          cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+           cute::make_tuple(_ReduceScatter{}),
+           cute::make_tuple(_RCR{}, _RRR{}),
+           cute::make_tuple(_GemmV2{}),
+@@ -91,8 +91,8 @@ struct GemmV2ReduceScatter_Space {
+       cute::make_tuple(
+           make_gemm_dtype_config(_S8{}, _S8{}, _BF16{}, _BF16{}, _S32{}),
+           make_gemm_dtype_config(_S8{}, _S8{}, _Void{}, _BF16{}, _S32{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_ReduceScatter{}),
+       cute::make_tuple(_RCR{}),
+       cute::make_tuple(_GemmV2{}),
+@@ -154,7 +154,7 @@ struct GemmV3ReduceScatter_Space {
+       [](auto meta_tuple) {
+         constexpr auto meta = to_gemm_meta(decltype(meta_tuple){});
+         constexpr auto rs_meta = to_reduce_scatter_meta(meta.comm_spec());
+-        return not(meta.arch() == _Sm80{} and meta.gemm_layout() == _RRR{}) and
++        return not((meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) and meta.gemm_layout() == _RRR{}) and
+                not(rs_meta.fuse_reduction() == _False{} and rs_meta.comm_kind() == _InterNode{});
+       });
+ 
+diff --git a/src/generator/gen_moe_ag_scatter.cc b/src/generator/gen_moe_ag_scatter.cc
+index 49f6968..75ef3cd 100644
+--- a/src/generator/gen_moe_ag_scatter.cc
++++ b/src/generator/gen_moe_ag_scatter.cc
+@@ -29,8 +29,8 @@ struct GemmGroupedV2AGScatter_Space {
+           make_gemm_dtype_config(_BF16{}),
+           make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+           make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_AGScatter{}),
+       cute::make_tuple(_RCR{}),
+       cute::make_tuple(_GemmGroupedV2{}),
+diff --git a/src/generator/gen_moe_gather_rs.cc b/src/generator/gen_moe_gather_rs.cc
+index 20c33d2..2292b48 100644
+--- a/src/generator/gen_moe_gather_rs.cc
++++ b/src/generator/gen_moe_gather_rs.cc
+@@ -28,8 +28,8 @@ struct GemmGroupedV2GatherRS_Space {
+           make_gemm_dtype_config(_BF16{}),
+           make_gemm_dtype_config(_FP16{}, _FP16{}, _Void{}, _FP16{}),
+           make_gemm_dtype_config(_BF16{}, _BF16{}, _Void{}, _BF16{})),
+-      cute::make_tuple(_Sm80{}, _Sm89{}),
+-      cute::make_tuple(_A100{}, _L20{}),
++      cute::make_tuple(_Sm80{}, _Sm86{}, _Sm89{}),
++      cute::make_tuple(_A100{}, _A6000{}, _L20{}),
+       cute::make_tuple(_GatherRS{}),
+       cute::make_tuple(_RCR{}),  // TODO(houqi.1993) only RCR is supported
+       cute::make_tuple(_GemmGroupedV2{}),
+-- 
+2.34.1
+
