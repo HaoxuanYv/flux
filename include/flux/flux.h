@@ -452,7 +452,7 @@ tuple_has_elem(cute::tuple<Ts...> const &tup, Elem const &e) {
 // Enum classes
 /////////////////////////////////////////////////////
 enum class DataTypeEnum : int8_t { Void, FP16, BF16, FP32, E4M3, E5M2 };
-enum class ArchEnum : int { Sm80 = 80, Sm89 = 89, Sm90 = 90 };
+enum class ArchEnum : int { Sm80 = 80, Sm86 = 86, Sm89 = 89, Sm90 = 90 };
 enum class CommOpEnum : int8_t {
   CommNone,       // gemm only, wo/ communication
   AllGather,      // tp allgather + gemm, comm not fused into gemm kernel
@@ -507,6 +507,7 @@ using _RCR = cute::C<GemmLayoutEnum::RCR>;
 using _RCC = cute::C<GemmLayoutEnum::RCC>;
 
 using _Sm80 = cute::C<ArchEnum::Sm80>;
+using _Sm86 = cute::C<ArchEnum::Sm86>;
 using _Sm89 = cute::C<ArchEnum::Sm89>;
 using _Sm90 = cute::C<ArchEnum::Sm90>;
 
@@ -735,6 +736,7 @@ inline char const *
 enum_to_string(ArchEnum arch) {
   switch (arch) {
     case ArchEnum::Sm80: return "Sm80";
+    case ArchEnum::Sm86: return "Sm86";
     case ArchEnum::Sm89: return "Sm89";
     case ArchEnum::Sm90: return "Sm90";
     default: return "UNK";

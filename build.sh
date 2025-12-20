@@ -220,7 +220,9 @@ function build_flux_py {
     fi
     popd
     ##### build flux torch bindings #####
-    MAX_JOBS=${JOBS} python3 setup.py develop --user
+    #MAX_JOBS=${JOBS} python3 setup.py develop --user
+    MAX_JOBS=${JOBS} pip3 install -e . --no-build-isolation
+
     if [ $BDIST_WHEEL == "ON" ]; then
         MAX_JOBS=${JOBS} python3 setup.py bdist_wheel
     fi

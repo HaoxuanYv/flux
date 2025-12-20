@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.17)
 
 set(OP_REGS "")
 flux_add_gemm_op_reg("all_gather/gemm_v2_ag_kernel.hpp" "GemmV2AGKernel" 8 "OP_REGS")
-flux_add_gemm_op_reg("all_gather/gemm_v3_ag_kernel.hpp" "GemmV3AGKernel" 16 "OP_REGS")
+#flux_add_gemm_op_reg("all_gather/gemm_v3_ag_kernel.hpp" "GemmV3AGKernel" 16 "OP_REGS")
 
 file(GLOB DISPATCHERS dispatcher/*.cu)
 file(GLOB TUNING_CONFIGS tuning_config/*.cu)

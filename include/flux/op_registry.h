@@ -243,6 +243,17 @@ class OpRegistry {
 
     auto unified_meta = unify_type(meta);
     auto meta_iter = op_registry_.find(unified_meta);
+    if (meta_iter == op_registry_.end()) {
+      std::cout << "================ [DEBUG: Op Not Found] ================" << std::endl;
+      std::cout << "Looking for meta: " << meta << std::endl;
+      std::cout << "Unified meta key: " << unified_meta << std::endl;
+      std::cout << "---------------- Available keys in registry: ----------------" << std::endl;
+      for (const auto& pair : op_registry_) {
+        // pair.first 是注册表里的 key
+        std::cout << " - " << pair.first << std::endl;
+      }
+      std::cout << "========================================================" << std::endl;
+  }
     FLUX_CHECK(meta_iter != op_registry_.end()) << "unregistered op for meta:" << meta;
     auto &meta_reg = meta_iter->second;
     auto unified_hparams = unify_type(hparams);

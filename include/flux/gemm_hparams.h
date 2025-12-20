@@ -275,7 +275,7 @@ auto_impl_spec(GemmMeta<Ts...> meta) {
       return make_gemm_v2_hparams(Shape<_64, _64, _32>{}, Shape<_16, _8, _16>{});
     }
   } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-    if constexpr (meta.arch() == _Sm80{}) {
+    if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
       return make_gemm_v3_hparams(Shape<_1, _1, _1>{});
     } else if constexpr (meta.arch() == _Sm90{}) {
       return make_gemm_v3_hparams(Shape<_2, _1, _1>{});
@@ -302,7 +302,7 @@ auto_tile_shape(GemmMeta<Ts...> meta, ImplHParams impl_hparams) {
       return Shape<_128, _128, _32>{};
     }
   } else if constexpr (meta.impl() == _GemmV3{} or meta.impl() == _GemmGroupedV3{}) {
-    if constexpr (meta.arch() == _Sm80{}) {
+    if constexpr (meta.arch() == _Sm80{} or meta.arch() == _Sm86{}) {
       return Shape<_256, _128, _32>{};
     } else {
       auto dt_conf = to_gemm_dtype_config(make_gemm_dtype_config(meta.dtype()));
@@ -418,6 +418,9 @@ filter_smem(GemmMeta<Ts...> meta, GemmHParams<Us...> hparams) {
                         hparams.mainloop_stage();
   // print("!!!!!!!!!!!! expect min smem : %d\n", expect_min_smem);
   if (meta.arch() == _Sm80{} and expect_min_smem > 163 * 1024) {
+    return false;
+  }
+  if (meta.arch() == _Sm86{} and expect_min_smem > 99 * 1024){
     return false;
   }
   if (meta.arch() == _Sm89{} and expect_min_smem > 99 * 1024) {
